@@ -8,6 +8,7 @@ from glob import glob
 from logging import getLogger, StreamHandler
 from subprocess import Popen, PIPE
 
+import pdb
 import numpy
 import pandas as pd
 
@@ -36,7 +37,8 @@ def create_adjacencies(fregex, pool=None):
     adjacencies = set()
     addresses = set()
     files = glob(fregex)
-    pb = Progress(len(files), 'Reading traceroutes', increment=1, callback=lambda: 'Adjacencies {:,d} Addresses {:,d}'.format(len(adjacencies), len(addresses)))
+    pb = Progress(len(files), 'Reading traceroutes', increment=1,
+                  callback=lambda: 'Adjacencies {:,d} Addresses {:,d}'.format(len(adjacencies), len(addresses)))
     if pool:
         p = create_cluster(pool)
         dv, lv = setup_parallel()
@@ -94,6 +96,8 @@ if __name__ == '__main__':
     parser.add_argument('-i', '--interfaces', dest='interfaces', help='Interface information')
     parser.add_argument('-o', '--as2org', dest='as2org', help='AS2ORG mappings')
     parser.add_argument('-m', '--pool', dest='pool', help='Number of processes to use')
+    parser.add_argument('--addr-family', dest='addr_family', help='The IP version',
+                        choices=["IPv4", "IPv6"], default='IPv4')
     # parser.add_argument('-p', '--asn-providers', dest='providers', help='List of ISP ASes')
     parser.add_argument('-t', '--traces', dest='traces',
                         help='Traceroute files as Unix regex (can be warts.gz or warts.bz2)')
@@ -150,10 +154,14 @@ if __name__ == '__main__':
         neighbors[(x, True)].append(y)
         neighbors[(y, False)].append(x)
     if args.interfaces:
-        df = pd.read_csv(args.interfaces, index_col='Address')
-        asns, orgs, othersides = df['ASN', 'Org', 'Otherside'].to_dict('records')
+        df = pd.read_csv(args.interfaces, index_col='Address', delimiter=',')
+        asns = df['ASN'].to_dict()
+        orgs = df['Org'].to_dict()
+        othersides = df['Otherside'].to_dict()
+        # asns, orgs, othersides = df['ASN', 'Org', 'Otherside'].to_dict('records')
     else:
-        addresses = {struct.unpack("!L", socket.inet_aton(addr.strip()))[0] for addr in addresses}
+        addresses = {struct.unpack("!L", socket.inet_aton(addr.strip()))[
+            0] for addr in addresses if (':' not in addr or args.addr_family == "IPv6")}
         ip2as = create_routing_table(args.bgp, args.ixp_prefixes, args.ixp_asns, bgp_compression=args.bgp_compression)
         as2org = AS2Org(args.as2org, include_potaroo=args.potaroo)
         status('Extracting addresses from adjacencies')
@@ -162,16 +170,18 @@ if __name__ == '__main__':
         log.info('Mapping IP addresses to ASes.')
         asns = {}
         for address in unique_interfaces:
-            asn = ip2as[address]
-            if asn != -1:
-                asns[address] = asn
+            if address is not None:
+                asn = ip2as[address]
+                if asn != -1:
+                    asns[address] = asn
         if as2org:
             log.info('Mapping ASes to Orgs.')
             orgs = {address: as2org.get(asn, asn) for address, asn in asns.items()}
         else:
             orgs = asns
         log.info('Determining other sides for each address (assuming point-to-point).')
-        othersides = {address: determine_otherside(address, addresses) for address in asns}
+        othersides = {address: determine_otherside(address, addresses)
+                      for address in asns if (':' not in address or args.addr_family == "IPv6")}
         if args.interface_exit:
             df = pd.DataFrame.from_dict({'Otherside': othersides, 'ASN': asns, 'Org': orgs}).rename_axis('Address')
             df.to_csv(args.interface_exit)
@@ -179,8 +189,8 @@ if __name__ == '__main__':
     log.info('Creating interface halves.')
     halves_dict = {
         (address, direction): InterfaceHalf(address, asns[address], orgs[address], direction, othersides[address])
-        for (address, direction) in neighbors if address in asns
-        }
+        for (address, direction) in neighbors if address in asns and (':' not in address or args.addr_family == "IPv6")
+    }
     for (address, direction), half in halves_dict.items():
         half.set_otherhalf(halves_dict.get((address, not direction)))
         half.set_otherside(halves_dict.get((half.otherside_address, not direction)))
