@@ -21,10 +21,13 @@ class TraceReader:
             self.p = self.p = Popen('cat {}'.format(self.filename), shell=True, stdout=PIPE,
                                     universal_newlines=True)
 
-        return map(json.loads, self.p.stdout) if self.json else self.p.stdout 
+        return map(json.loads, self.p.stdout) if self.json else self.p.stdout
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.p.kill()
+        try:
+            self.p.kill()
+        except ProcessLookupError:
+            pass
         return False
 
 
@@ -44,9 +47,9 @@ def extract_trace(hops):
     trace = numpy.full(len(hops), fill_value=None, dtype='object')
     for hop in hops:
         if 'result' in hop:
-            for reply in hop['result']: 
+            for reply in hop['result']:
                 ttl = hop['hop'] - 1
-                if 'from' in reply and ttl<len(trace):
+                if 'from' in reply and ttl < len(trace):
                     addr = reply['from']
                     if trace[ttl] is None:
                         trace[ttl] = addr
@@ -54,8 +57,9 @@ def extract_trace(hops):
                         trace[ttl] = False
     return trace
 
-def process_trace(trace, addresses, adjacencies):
-    if 'result' in trace:
+
+def process_trace(trace, addresses, adjacencies, af='IPv4'):
+    if 'result' in trace and (trace['af'] == int(af[-1])):
         for hop in trace['result']:
             if 'result' in hop:
                 addresses.update(reply['from'] for reply in hop['result'] if 'from' in reply)
@@ -64,7 +68,7 @@ def process_trace(trace, addresses, adjacencies):
                 # if j['stop_reason'] != 'LOOP':
         trace = extract_trace(trace['result'])
         if cycle_free(trace):
-                adjacencies.update((x, y) for x, y in zip(trace, trace[1:]) if x and y)
+            adjacencies.update((x, y) for x, y in zip(trace, trace[1:]) if x and y)
 
 
 def process_trace_file(filename):

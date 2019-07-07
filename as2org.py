@@ -11,7 +11,7 @@ from utils import File2
 log = getLogger()
 
 OrgInfo = namedtuple('OrgInfo', ['org_id', 'changed', 'org_name', 'country', 'source'])
-ASInfo = namedtuple('ASInfo', ['aut', 'changed', 'aut_name', 'org_id', 'source'])
+ASInfo = namedtuple('ASInfo', ['aut', 'changed', 'aut_name', 'org_id', 'opaque_id', 'source'])
 PotarooInfo = namedtuple('PotarooInfo', ['aut', 'aut_name', 'name', 'country', 'url'])
 
 
